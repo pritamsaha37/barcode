@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Generator with Interactive Placement</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .step-active { border-color: #3b82f6; color: #3b82f6; }
+        .step-active .step-circle { background-color: #3b82f6; color: white; }
+        .step-inactive .step-circle { background-color: #e5e7eb; color: #4b5563; }
+        #canvas-container { position: relative; width: 100%; max-width: 800px; margin: auto; line-height: 0; user-select: none;}
+        canvas { display: block; max-width: 100%; height: auto; border-radius: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .option-card { border: 2px solid #e5e7eb; transition: all 0.2s ease-in-out; }
+        .option-card.selected { border-color: #3b82f6; background-color: #eff6ff; }
+        
+        /* Interactive Element Styles */
+        .placement-element {
+            position: absolute;
+            cursor: move;
+            border: 2px dashed transparent;
+        }
+        .placement-element.selected {
+            border-color: #3b82f6;
+            z-index: 10;
+        }
+        .placement-element canvas {
+            width: 100%;
+            height: 100%;
+        }
+        .handle {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            background-color: white;
+            border: 2px solid #3b82f6;
+            border-radius: 50%;
+            z-index: 11;
+        }
+        .handle.resize { 
+            cursor: nwse-resize; 
+            bottom: -7px; 
+            right: -7px;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-gray-900">Ticket Generator</h1>
+            <p class="text-lg text-gray-600 mt-2">Upload your design, place barcodes, and generate your tickets.</p>
+        </header>
+
+        <div class="bg-white p-6 rounded-lg shadow-lg">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 text-center">
+                <div id="step-1" class="step-active p-4 border-b-4"><div class="step-circle w-8 h-8 mx-auto rounded-full flex items-center justify-center font-bold mb-2">1</div><h3 class="font-semibold">Upload Design</h3></div>
+                <div id="step-2" class="step-inactive p-4 border-b-4 border-gray-200"><div class="step-circle w-8 h-8 mx-auto rounded-full flex items-center justify-center font-bold mb-2">2</div><h3 class="font-semibold">Place Barcodes</h3></div>
+                <div id="step-3" class="step-inactive p-4 border-b-4 border-gray-200"><div class="step-circle w-8 h-8 mx-auto rounded-full flex items-center justify-center font-bold mb-2">3</div><h3 class="font-semibold">Generate Tickets</h3></div>
+            </div>
+
+            <div id="app-content">
+                <div id="upload-section">
+                    <h2 class="text-2xl font-semibold mb-4 text-center">Step 1: Upload Your Ticket Design</h2>
+                    <div class="flex flex-col items-center bg-gray-50 p-8 rounded-lg border-2 border-dashed border-gray-300">
+                         <svg class="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        <label for="ticket-upload" class="cursor-pointer bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors">Choose an Image</label>
+                        <input type="file" id="ticket-upload" class="hidden" accept="image/png, image/jpeg">
+                        <p class="mt-2 text-sm text-gray-500">PNG or JPG recommended.</p>
+                    </div>
+                </div>
+
+                <div id="placement-section" class="hidden">
+                    <div class="grid md:grid-cols-3 gap-6">
+                        <div class="md:col-span-2">
+                             <h2 class="text-2xl font-semibold mb-4 text-center">Step 2: Position Barcode Areas</h2>
+                            <div id="canvas-container">
+                                <canvas id="ticket-canvas"></canvas>
+                                <div id="element-container"></div>
+                            </div>
+                        </div>
+                        <div class="md:col-span-1">
+                             <h3 class="text-xl font-semibold mb-4 text-center">Tools</h3>
+                             <div class="space-y-4">
+                                <button id="add-barcode-btn" class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors">Add Barcode Area</button>
+                                <div id="element-controls" class="hidden p-4 bg-gray-50 rounded-lg space-y-4 border">
+                                     <h4 class="font-semibold text-center text-gray-700">Selected Barcode</h4>
+                                     <div class="grid grid-cols-2 gap-2">
+                                         <button id="rotate-left-btn" class="w-full flex items-center justify-center bg-gray-200 text-gray-700 font-bold py-2 px-2 rounded-lg hover:bg-gray-300 transition-colors">Rotate Left</button>
+                                         <button id="rotate-right-btn" class="w-full flex items-center justify-center bg-gray-200 text-gray-700 font-bold py-2 px-2 rounded-lg hover:bg-gray-300 transition-colors">Rotate Right</button>
+                                     </div>
+                                     <button id="control-delete" class="w-full bg-red-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-600 transition-colors">Delete</button>
+                                </div>
+                                <button id="confirm-areas-btn" class="w-full bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors" disabled>Confirm & Proceed</button>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="generation-section" class="hidden">
+                    <h2 class="text-2xl font-semibold mb-4 text-center">Step 3: Configure and Generate</h2>
+                    <div class="max-w-xl mx-auto">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div><label for="ticket-quantity" class="block text-sm font-medium text-gray-700">Ticket Quantity</label><input type="number" id="ticket-quantity" value="10" min="1" max="1000" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"></div>
+                            <div><label for="serial-prefix" class="block text-sm font-medium text-gray-700">Serial Prefix (Optional)</label><input type="text" id="serial-prefix" placeholder="EVENT2025-" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"></div>
+                            <div><label for="start-number" class="block text-sm font-medium text-gray-700">Start Number</label><input type="number" id="start-number" value="1001" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"></div>
+                            <div><label for="include-serial-text" class="block text-sm font-medium text-gray-700">Include Serial Text?</label><div class="mt-2 flex items-center"><input type="checkbox" id="include-serial-text" checked class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"><label for="include-serial-text" class="ml-2 block text-sm text-gray-900">Show number below barcode</label></div></div>
+                        </div>
+                        <div class="mt-6 border-t pt-6">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Output Format</label>
+                            <div role="radiogroup" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label for="output-zip" class="option-card selected p-4 rounded-lg cursor-pointer text-center"><input type="radio" name="output-format" id="output-zip" value="zip" class="hidden" checked><div class="font-bold text-lg">ZIP Archive</div><div class="text-sm text-gray-500">Individual PNG images</div></label>
+                                <label for="output-pdf" class="option-card p-4 rounded-lg cursor-pointer text-center"><input type="radio" name="output-format" id="output-pdf" value="pdf" class="hidden"><div class="font-bold text-lg">Printable PDF</div><div class="text-sm text-gray-500">All tickets on A4 pages</div></label>
+                            </div>
+                        </div>
+                        <div id="pdf-options" class="hidden mt-6 border-t pt-6 md:col-span-2">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div><label for="pdf-margin" class="block text-sm font-medium text-gray-700">Page Margins (mm)</label><input type="number" id="pdf-margin" value="10" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"></div>
+                                <div><label for="pdf-crop-marks" class="block text-sm font-medium text-gray-700">Printing Aids</label><div class="mt-2 flex items-center"><input type="checkbox" id="pdf-crop-marks" checked class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"><label for="pdf-crop-marks" class="ml-2 block text-sm text-gray-900">Add crop marks for cutting</label></div></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-center mt-8">
+                        <button id="generate-btn" class="bg-green-500 text-white font-bold py-3 px-6 rounded-lg text-lg hover:bg-green-600 transition-colors">Generate</button>
+                    </div>
+                    <div id="progress-bar-container" class="hidden mt-6 max-w-md mx-auto">
+                        <div class="w-full bg-gray-200 rounded-full h-4"><div id="progress-bar" class="bg-blue-500 h-4 rounded-full" style="width: 0%"></div></div>
+                        <p id="progress-text" class="text-center mt-2 text-sm text-gray-600"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM Elements ---
+        const uploadInput = document.getElementById('ticket-upload');
+        const canvas = document.getElementById('ticket-canvas'), ctx = canvas.getContext('2d');
+        const elementContainer = document.getElementById('element-container');
+        const generateBtn = document.getElementById('generate-btn');
+        const addBarcodeBtn = document.getElementById('add-barcode-btn');
+        const confirmAreasBtn = document.getElementById('confirm-areas-btn');
+        const elementControls = document.getElementById('element-controls');
+        const rotateLeftBtn = document.getElementById('rotate-left-btn'), rotateRightBtn = document.getElementById('rotate-right-btn'), controlDelete = document.getElementById('control-delete');
+        
+        const uploadSection = document.getElementById('upload-section'), placementSection = document.getElementById('placement-section'), generationSection = document.getElementById('generation-section');
+        const step1 = document.getElementById('step-1'), step2 = document.getElementById('step-2'), step3 = document.getElementById('step-3');
+        const quantityInput = document.getElementById('ticket-quantity'), prefixInput = document.getElementById('serial-prefix'), startNumInput = document.getElementById('start-number'), includeSerialTextCheckbox = document.getElementById('include-serial-text');
+        const progressBarContainer = document.getElementById('progress-bar-container'), progressBar = document.getElementById('progress-bar'), progressText = document.getElementById('progress-text');
+        const outputFormatRadios = document.querySelectorAll('input[name="output-format"]');
+        const pdfOptionsDiv = document.getElementById('pdf-options');
+
+        // --- App State ---
+        let ticketImage = null;
+        let elements = [];
+        let selectedElementId = null;
+        let actionState = { action: null, elementId: null, startX: 0, startY: 0, startW: 0, startH: 0 };
+
+        // --- Event Listeners ---
+        uploadInput.addEventListener('change', handleImageUpload);
+        addBarcodeBtn.addEventListener('click', addBarcodeElement);
+        confirmAreasBtn.addEventListener('click', () => goToStep(3));
+        generateBtn.addEventListener('click', handleGeneration);
+        outputFormatRadios.forEach(radio => radio.addEventListener('change', handleOutputFormatChange));
+        rotateLeftBtn.addEventListener('click', () => rotateSelectedElement(-90));
+        rotateRightBtn.addEventListener('click', () => rotateSelectedElement(90));
+        controlDelete.addEventListener('click', deleteSelectedElement);
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+        window.addEventListener('resize', renderElements);
+
+        function handleImageUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                ticketImage = new Image();
+                ticketImage.onload = () => {
+                    canvas.width = ticketImage.width;
+                    canvas.height = ticketImage.height;
+                    ctx.drawImage(ticketImage, 0, 0);
+                    elements = [];
+                    renderElements();
+                    goToStep(2);
+                };
+                ticketImage.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function addBarcodeElement() {
+            const id = `el-${Date.now()}`;
+            const tempBarcodeCanvas = document.createElement('canvas');
+            JsBarcode(tempBarcodeCanvas, "12345678", { displayValue: true });
+            const aspectRatio = tempBarcodeCanvas.width / tempBarcodeCanvas.height;
+            
+            const newElement = {
+                id, x: 50, y: 50, w: 150, h: 150 / aspectRatio, rotation: 0, aspectRatio
+            };
+            elements.push(newElement);
+            renderElements();
+            selectElement(id);
+            confirmAreasBtn.disabled = false;
+        }
+
+        function renderElements() {
+            if (!ticketImage) return;
+            elementContainer.innerHTML = '';
+            const scale = canvas.clientWidth / canvas.width;
+            elements.forEach(el => {
+                const elDiv = document.createElement('div');
+                elDiv.className = 'placement-element';
+                elDiv.dataset.id = el.id;
+                elDiv.style.left = `${el.x * scale}px`;
+                elDiv.style.top = `${el.y * scale}px`;
+                elDiv.style.width = `${el.w * scale}px`;
+                elDiv.style.height = `${el.h * scale}px`;
+                elDiv.style.transform = `rotate(${el.rotation}deg)`;
+
+                const barcodePreviewCanvas = document.createElement('canvas');
+                elDiv.appendChild(barcodePreviewCanvas);
+                JsBarcode(barcodePreviewCanvas, "PREVIEW", {displayValue: true, margin: 0});
+
+                if (el.id === selectedElementId) {
+                    elDiv.classList.add('selected');
+                    const resizeHandle = document.createElement('div');
+                    resizeHandle.className = 'handle resize';
+                    resizeHandle.style.bottom = '-7px';
+                    resizeHandle.style.right = '-7px';
+                    resizeHandle.dataset.action = 'resize';
+                    elDiv.appendChild(resizeHandle);
+                }
+                
+                elDiv.addEventListener('mousedown', handleElementMouseDown);
+                elementContainer.appendChild(elDiv);
+            });
+        }
+        
+        function handleElementMouseDown(e) {
+            e.stopPropagation();
+            const id = e.currentTarget.dataset.id;
+            selectElement(id);
+
+            const action = e.target.dataset.action || 'drag';
+            const element = elements.find(el => el.id === id);
+            
+            actionState = {
+                action, elementId: id,
+                startX: e.clientX, startY: e.clientY,
+                startElX: element.x, startElY: element.y,
+                startW: element.w, startH: element.h,
+            };
+        }
+        
+        function handleMouseMove(e) {
+            if (!actionState.action) return;
+            e.preventDefault();
+
+            const scale = canvas.width / canvas.clientWidth;
+            const dx = (e.clientX - actionState.startX) * scale;
+            const dy = (e.clientY - actionState.startY) * scale;
+            const element = elements.find(el => el.id === actionState.elementId);
+
+            if (actionState.action === 'drag') {
+                element.x = actionState.startElX + dx;
+                element.y = actionState.startElY + dy;
+            } else if (actionState.action === 'resize') {
+                const newWidth = Math.max(30, actionState.startW + dx);
+                element.w = newWidth;
+                element.h = newWidth / element.aspectRatio; // Lock aspect ratio
+            }
+            
+            renderElements();
+        }
+
+        function handleMouseUp() {
+            actionState.action = null;
+        }
+
+        function selectElement(id) {
+            selectedElementId = id;
+            elementControls.classList.remove('hidden');
+            renderElements();
+        }
+        
+        function deleteSelectedElement() {
+            if (!selectedElementId) return;
+            elements = elements.filter(el => el.id !== selectedElementId);
+            selectedElementId = null;
+            elementControls.classList.add('hidden');
+            renderElements();
+            if (elements.length === 0) {
+                confirmAreasBtn.disabled = true;
+            }
+        }
+
+        function rotateSelectedElement(angle) {
+            if (!selectedElementId) return;
+            const element = elements.find(el => el.id === selectedElementId);
+            element.rotation = (element.rotation + angle) % 360;
+            renderElements();
+        }
+
+        function handleOutputFormatChange(e) {
+            document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+            e.target.closest('.option-card').classList.add('selected');
+            pdfOptionsDiv.classList.toggle('hidden', e.target.value !== 'pdf');
+        }
+
+        function handleGeneration() {
+            const outputFormat = document.querySelector('input[name="output-format"]:checked').value;
+            if (outputFormat === 'zip') {
+                generateZip();
+            } else {
+                generatePdf();
+            }
+        }
+
+        function generateCompositeTicketImage(serialNumber) {
+            const finalTicketCanvas = document.createElement('canvas');
+            finalTicketCanvas.width = ticketImage.width;
+            finalTicketCanvas.height = ticketImage.height;
+            const finalCtx = finalTicketCanvas.getContext('2d');
+            finalCtx.drawImage(ticketImage, 0, 0);
+
+            const barcodeCanvas = document.createElement('canvas');
+            try {
+                JsBarcode(barcodeCanvas, serialNumber, {
+                    format: "CODE128", displayValue: includeSerialTextCheckbox.checked,
+                    width: 2, height: 100, fontSize: 20, margin: 10
+                });
+            } catch (error) {
+                throw new Error(`Could not generate barcode for serial: ${serialNumber}.`);
+            }
+            if (!barcodeCanvas.width) {
+                 throw new Error(`JsBarcode failed to generate an image for serial: ${serialNumber}.`);
+            }
+
+            elements.forEach(destBox => {
+                finalCtx.save();
+                finalCtx.translate(destBox.x + destBox.w / 2, destBox.y + destBox.h / 2);
+                finalCtx.rotate(destBox.rotation * Math.PI / 180);
+                finalCtx.drawImage(barcodeCanvas, -destBox.w / 2, -destBox.h / 2, destBox.w, destBox.h);
+                finalCtx.restore();
+            });
+
+            return finalTicketCanvas;
+        }
+
+        async function generateZip() {
+            generateBtn.disabled = true;
+            progressBarContainer.classList.remove('hidden');
+            const quantity = parseInt(quantityInput.value, 10);
+            const prefix = prefixInput.value;
+            const startNum = parseInt(startNumInput.value, 10);
+            const zip = new JSZip();
+
+            for (let i = 0; i < quantity; i++) {
+                const percentComplete = ((i + 1) / quantity) * 100;
+                progressBar.style.width = `${percentComplete}%`;
+                const serialNumber = `${prefix}${startNum + i}`;
+                progressText.textContent = `Generating ticket ${serialNumber}...`;
+                try {
+                    const ticketCanvas = generateCompositeTicketImage(serialNumber);
+                    const imageData = ticketCanvas.toDataURL('image/png').split(',')[1];
+                    zip.file(`ticket_${serialNumber}.png`, imageData, { base64: true });
+                } catch (error) {
+                    alert(error.message);
+                    generateBtn.disabled = false;
+                    progressBarContainer.classList.add('hidden');
+                    return;
+                }
+                await new Promise(resolve => setTimeout(resolve, 10)); 
+            }
+
+            progressText.textContent = 'Compressing files...';
+            zip.generateAsync({ type: "blob" }).then(content => {
+                saveAs(content, "GeneratedTickets.zip");
+                progressText.textContent = 'Done!';
+                setTimeout(() => {
+                    progressBarContainer.classList.add('hidden');
+                    generateBtn.disabled = false;
+                }, 2000);
+            });
+        }
+
+        async function generatePdf() {
+            generateBtn.disabled = true;
+            progressBarContainer.classList.remove('hidden');
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+            const quantity = parseInt(quantityInput.value, 10);
+            const prefix = prefixInput.value;
+            const startNum = parseInt(startNumInput.value, 10);
+            const margin = parseFloat(document.getElementById('pdf-margin').value);
+            const addCropMarks = document.getElementById('pdf-crop-marks').checked;
+            const A4_WIDTH_MM = 210, A4_HEIGHT_MM = 297;
+            const printableWidthMM = A4_WIDTH_MM - 2 * margin;
+            const printableHeightMM = A4_HEIGHT_MM - 2 * margin;
+            const ticketAspectRatio = ticketImage.width / ticketImage.height;
+            const ticketWidthOnPageMM = printableWidthMM;
+            const ticketHeightOnPageMM = ticketWidthOnPageMM / ticketAspectRatio;
+
+            if (ticketHeightOnPageMM > printableHeightMM) {
+                alert("A single ticket is too tall for the page.");
+                generateBtn.disabled = false;
+                progressBarContainer.classList.add('hidden');
+                return;
+            }
+            const rows = Math.floor(printableHeightMM / ticketHeightOnPageMM);
+            const ticketsPerPage = rows * 1;
+            if (ticketsPerPage === 0) {
+                alert("Could not fit any tickets on the page.");
+                generateBtn.disabled = false;
+                progressBarContainer.classList.add('hidden');
+                return;
+            }
+
+            for (let i = 0; i < quantity; i++) {
+                const percentComplete = ((i + 1) / quantity) * 100;
+                progressBar.style.width = `${percentComplete}%`;
+                const serialNumber = `${prefix}${startNum + i}`;
+                progressText.textContent = `Generating ticket ${serialNumber}...`;
+                if (i > 0 && i % ticketsPerPage === 0) doc.addPage();
+                let ticketCanvas;
+                try {
+                    ticketCanvas = generateCompositeTicketImage(serialNumber);
+                } catch (error) {
+                    alert(error.message);
+                    generateBtn.disabled = false;
+                    progressBarContainer.classList.add('hidden');
+                    return;
+                }
+                const ticketOnPageIndex = i % ticketsPerPage;
+                const row = ticketOnPageIndex % rows;
+                const x = margin;
+                const y = margin + (row * ticketHeightOnPageMM);
+                doc.addImage(ticketCanvas, 'PNG', x, y, ticketWidthOnPageMM, ticketHeightOnPageMM, undefined, 'FAST');
+                if (addCropMarks) {
+                    const cropLength = 4;
+                    doc.setDrawColor(150);
+                    doc.setLineWidth(0.1);
+                    doc.line(x - cropLength, y, x + cropLength, y);
+                    doc.line(x, y - cropLength, x, y + cropLength);
+                    doc.line(x + ticketWidthOnPageMM - cropLength, y, x + ticketWidthOnPageMM + cropLength, y);
+                    doc.line(x + ticketWidthOnPageMM, y - cropLength, x + ticketWidthOnPageMM, y + cropLength);
+                    doc.line(x - cropLength, y + ticketHeightOnPageMM, x + cropLength, y + ticketHeightOnPageMM);
+                    doc.line(x, y + ticketHeightOnPageMM - cropLength, x, y + ticketHeightOnPageMM + cropLength);
+                    doc.line(x + ticketWidthOnPageMM - cropLength, y + ticketHeightOnPageMM, x + ticketWidthOnPageMM + cropLength, y + ticketHeightOnPageMM);
+                    doc.line(x + ticketWidthOnPageMM, y + ticketHeightOnPageMM - cropLength, x + ticketWidthOnPageMM, y + ticketHeightOnPageMM + cropLength);
+                }
+                await new Promise(resolve => setTimeout(resolve, 10)); 
+            }
+
+            progressText.textContent = 'Saving PDF...';
+            const pdfBlob = doc.output('blob');
+            saveAs(pdfBlob, 'Printable_Tickets.pdf');
+            progressText.textContent = 'Done!';
+            setTimeout(() => {
+                progressBarContainer.classList.add('hidden');
+                generateBtn.disabled = false;
+            }, 2000);
+        }
+
+        function goToStep(stepNumber) {
+            uploadSection.classList.add('hidden');
+            placementSection.classList.add('hidden');
+            generationSection.classList.add('hidden');
+            [step1, step2, step3].forEach(s => {
+                s.classList.remove('step-active');
+                s.classList.add('step-inactive', 'border-gray-200');
+            });
+            const activateStep = (stepEl) => {
+                stepEl.classList.add('step-active');
+                stepEl.classList.remove('step-inactive', 'border-gray-200');
+            };
+            if (stepNumber === 1) {
+                uploadSection.classList.remove('hidden');
+                activateStep(step1);
+            } else if (stepNumber === 2) {
+                placementSection.classList.remove('hidden');
+                activateStep(step1);
+                activateStep(step2);
+            } else if (stepNumber === 3) {
+                generationSection.classList.remove('hidden');
+                activateStep(step1);
+                activateStep(step2);
+                activateStep(step3);
+            }
+        }
+    </script>
+
+</body>
+</html>
