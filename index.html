@@ -25,6 +25,7 @@
             position: absolute;
             cursor: move;
             border: 2px dashed transparent;
+            touch-action: none; 
         }
         .placement-element.selected {
             border-color: #3b82f6;
@@ -36,17 +37,18 @@
         }
         .handle {
             position: absolute;
-            width: 14px;
-            height: 14px;
+            width: 16px;
+            height: 16px;
             background-color: white;
             border: 2px solid #3b82f6;
             border-radius: 50%;
             z-index: 11;
+            touch-action: none; 
         }
         .handle.resize { 
             cursor: nwse-resize; 
-            bottom: -7px; 
-            right: -7px;
+            bottom: -8px; 
+            right: -8px;
         }
     </style>
 </head>
@@ -77,7 +79,7 @@
                 </div>
 
                 <div id="placement-section" class="hidden">
-                    <div class="grid md:grid-cols-3 gap-6">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div class="md:col-span-2">
                              <h2 class="text-2xl font-semibold mb-4 text-center">Step 2: Position Barcode Areas</h2>
                             <div id="canvas-container">
@@ -86,7 +88,7 @@
                             </div>
                         </div>
                         <div class="md:col-span-1">
-                             <h3 class="text-xl font-semibold mb-4 text-center">Tools</h3>
+                             <h3 class="text-xl font-semibold mb-4 text-center mt-4 md:mt-0">Tools</h3>
                              <div class="space-y-4">
                                 <button id="add-barcode-btn" class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 transition-colors">Add Barcode Area</button>
                                 <div id="element-controls" class="hidden p-4 bg-gray-50 rounded-lg space-y-4 border">
@@ -171,8 +173,10 @@
         rotateLeftBtn.addEventListener('click', () => rotateSelectedElement(-90));
         rotateRightBtn.addEventListener('click', () => rotateSelectedElement(90));
         controlDelete.addEventListener('click', deleteSelectedElement);
-        document.addEventListener('mousemove', handleMouseMove);
-        document.addEventListener('mouseup', handleMouseUp);
+        document.addEventListener('mousemove', handleInteractionMove);
+        document.addEventListener('mouseup', handleInteractionEnd);
+        document.addEventListener('touchmove', handleInteractionMove, { passive: false });
+        document.addEventListener('touchend', handleInteractionEnd);
         window.addEventListener('resize', renderElements);
 
         function handleImageUpload(e) {
@@ -196,12 +200,15 @@
 
         function addBarcodeElement() {
             const id = `el-${Date.now()}`;
-            const tempBarcodeCanvas = document.createElement('canvas');
-            JsBarcode(tempBarcodeCanvas, "12345678", { displayValue: true });
-            const aspectRatio = tempBarcodeCanvas.width / tempBarcodeCanvas.height;
+            // FIXED: Set a wide aspect ratio to match the desired long barcode shape
+            const aspectRatio = 4.0;
             
             const newElement = {
-                id, x: 50, y: 50, w: 150, h: 150 / aspectRatio, rotation: 0, aspectRatio
+                id, x: 50, y: 50, 
+                w: 200, // Start with a default width
+                h: 200 / aspectRatio, // Calculate height based on the new aspect ratio
+                rotation: 0, 
+                aspectRatio
             };
             elements.push(newElement);
             renderElements();
@@ -231,40 +238,50 @@
                     elDiv.classList.add('selected');
                     const resizeHandle = document.createElement('div');
                     resizeHandle.className = 'handle resize';
-                    resizeHandle.style.bottom = '-7px';
-                    resizeHandle.style.right = '-7px';
                     resizeHandle.dataset.action = 'resize';
                     elDiv.appendChild(resizeHandle);
                 }
                 
-                elDiv.addEventListener('mousedown', handleElementMouseDown);
+                elDiv.addEventListener('mousedown', handleInteractionStart);
+                elDiv.addEventListener('touchstart', handleInteractionStart, { passive: false });
                 elementContainer.appendChild(elDiv);
             });
         }
         
-        function handleElementMouseDown(e) {
+        function getEventCoords(e) {
+            if (e.touches && e.touches.length) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        }
+
+        function handleInteractionStart(e) {
             e.stopPropagation();
+            if (e.type === 'touchstart') e.preventDefault();
+            
             const id = e.currentTarget.dataset.id;
             selectElement(id);
 
             const action = e.target.dataset.action || 'drag';
             const element = elements.find(el => el.id === id);
+            const coords = getEventCoords(e);
             
             actionState = {
                 action, elementId: id,
-                startX: e.clientX, startY: e.clientY,
+                startX: coords.x, startY: coords.y,
                 startElX: element.x, startElY: element.y,
                 startW: element.w, startH: element.h,
             };
         }
         
-        function handleMouseMove(e) {
+        function handleInteractionMove(e) {
             if (!actionState.action) return;
             e.preventDefault();
 
             const scale = canvas.width / canvas.clientWidth;
-            const dx = (e.clientX - actionState.startX) * scale;
-            const dy = (e.clientY - actionState.startY) * scale;
+            const coords = getEventCoords(e);
+            const dx = (coords.x - actionState.startX) * scale;
+            const dy = (coords.y - actionState.startY) * scale;
             const element = elements.find(el => el.id === actionState.elementId);
 
             if (actionState.action === 'drag') {
@@ -279,7 +296,7 @@
             renderElements();
         }
 
-        function handleMouseUp() {
+        function handleInteractionEnd() {
             actionState.action = null;
         }
 
